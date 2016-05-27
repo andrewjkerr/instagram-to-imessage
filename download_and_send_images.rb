@@ -100,6 +100,7 @@ def send_image(image_path, target_phone_number)
   END
 
   puts "Image sent!"
+  true
 end
 
 def osascript(script)
