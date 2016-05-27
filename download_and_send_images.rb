@@ -52,14 +52,15 @@ end
 def process_images(data, image_count, max_image_count, target_phone_number)
   data.each do |image|
     return image_count if image_count >= max_image_count
-    download_and_send_image(image, target_phone_number)
-    image_count += 1
+    send_status = download_and_send_image(image, target_phone_number)
+    image_count += 1 if send_status
   end
   image_count
 end
 
 # Download the image
 def download_and_send_image(image, target_phone_number)
+  instagram_url = image['link']
   image_url = image['images']['standard_resolution']['url']
   image_id = image['id']
   image_path = "imgs/#{image_id}.jpg"
@@ -71,7 +72,21 @@ def download_and_send_image(image, target_phone_number)
     f.close
   end
 
+  verified = verify_image(instagram_url)
+  return false unless verified
+
   send_image(image_path, target_phone_number)
+end
+
+def verify_image(instagram_url)
+  puts "Send this image? Y/n: #{instagram_url}"
+  input = STDIN.gets.chomp.downcase
+
+  if input == 'y'
+    true
+  else
+    false
+  end
 end
 
 def send_image(image_path, target_phone_number)
@@ -83,6 +98,8 @@ def send_image(image_path, target_phone_number)
       send imageAttachment to buddy "#{target_phone_number}" of service "E:#{ENV['APPLE_ID']}"
     end tell
   END
+
+  puts "Image sent!"
 end
 
 def osascript(script)
