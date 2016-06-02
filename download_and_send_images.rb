@@ -5,7 +5,7 @@ require 'httparty'
 def figaro_init
   Figaro.application = Figaro::Application.new(environment: 'production', path: 'config/application.yml')
   Figaro.load
-  Figaro.require_keys('INSTAGRAM_CLIENT_ID')
+  Figaro.require_keys('TUMBLR_CONSUMER_KEY')
 end
 
 def process_args
@@ -24,14 +24,16 @@ end
 
 def download_and_send_images(tag, max_image_count, target_phone_number)
   # Initial URL
-  url = "https://api.instagram.com/v1/tags/#{tag}/media/recent?client_id=#{ENV['INSTAGRAM_CLIENT_ID']}"
+  url = "https://api.tumblr.com/v2/tagged?tag=#{tag}&api_key=#{ENV['TUMBLR_CONSUMER_KEY']}"
   image_count = 0
 
-  # We run out of images if we don't get a next_url returned
   until url.nil?
-    instagram_response = HTTParty.get(url)
-    url, data = process_response(instagram_response)
-    image_count = process_images(data, image_count, max_image_count, target_phone_number)
+    tumblr_response = HTTParty.get(url)
+    data = process_response(tumblr_response)
+    return if data.size == 0
+
+    url = determine_pagination(data.last, tag)
+    image_count = process_posts(data, image_count, max_image_count, target_phone_number)
 
     # Check if we've reached out image count!
     return puts "Image count reached! :)" if image_count >= max_image_count
@@ -42,28 +44,35 @@ end
 
 # Grab the next_url and the data from the response
 def process_response(response)
-  instagram_hash = JSON.parse(response.body)
-  next_url = instagram_hash.dig('pagination', 'next_url')
-  data = instagram_hash.dig('data')
-  [next_url, data]
+  tumblr_hash = JSON.parse(response.body)
+  tumblr_hash.dig('response')
+end
+
+def determine_pagination(post, tag)
+  timestamp = post.dig("timestamp")
+  return nil if timestamp.nil?
+
+  "https://api.tumblr.com/v2/tagged?tag=#{tag}&before=timestamp&api_key=#{ENV['TUMBLR_CONSUMER_KEY']}"
 end
 
 # Process the image array
-def process_images(data, image_count, max_image_count, target_phone_number)
-  data.each do |image|
+def process_posts(data, image_count, max_image_count, target_phone_number)
+  data.each do |post|
     return image_count if image_count >= max_image_count
-    send_status = download_and_send_image(image, target_phone_number)
+    next unless post["type"] == "photo"
+
+    send_status = download_and_send_image(post, target_phone_number)
     image_count += 1 if send_status
   end
   image_count
 end
 
 # Download the image
-def download_and_send_image(image, target_phone_number)
-  instagram_url = image['link']
-  image_url = image['images']['standard_resolution']['url']
-  image_id = image['id']
-  image_path = "imgs/#{image_id}.jpg"
+def download_and_send_image(post, target_phone_number)
+  tumblr_url = post['post_url']
+  image_url = post['photos'].first['original_size']['url']
+  post_id = post['id']
+  image_path = "imgs/#{post_id}.jpg"
 
   File.open(image_path, 'wb') do |f|
     f.binmode
@@ -72,14 +81,14 @@ def download_and_send_image(image, target_phone_number)
     f.close
   end
 
-  verified = verify_image(instagram_url)
+  verified = verify_image(tumblr_url)
   return false unless verified
 
   send_image(image_path, target_phone_number)
 end
 
-def verify_image(instagram_url)
-  puts "Send this image? Y/n: #{instagram_url}"
+def verify_image(tumblr_url)
+  puts "Send this image? Y/n: #{tumblr_url}"
   input = STDIN.gets.chomp.downcase
 
   if input == 'y'
